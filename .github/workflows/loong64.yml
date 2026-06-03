@@ -57,13 +57,13 @@ jobs:
       - name: Install build tools
         run: |
           apt update
-          apt install -y git make golang file
+          apt install -y git golang file
       #- name: Apply patches
       #  working-directory: plugins
       #  run: git apply ../*.patch
       - name: Build plugins
         working-directory: plugins
-        run: make
+        run: build_linux.sh
       - name: Print binary SHA-256 checksums
         working-directory: plugins
         run: |
