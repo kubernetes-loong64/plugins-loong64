@@ -63,6 +63,9 @@ jobs:
       #  run: git apply ../*.patch
       - name: Build plugins
         working-directory: plugins
+        env:
+          GOOS: linux
+          GOARCH: loong64
         run: ./build_linux.sh
       - name: Print binary SHA-256 checksums
         working-directory: plugins
