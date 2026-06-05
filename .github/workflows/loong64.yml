@@ -46,18 +46,15 @@ jobs:
           fi
           echo "IS_STABLE=$IS_STABLE"
           echo "IS_STABLE=$IS_STABLE" >> ${GITHUB_OUTPUT}
-      - name: Clone plugins
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: containernetworking/plugins
-          ref: ${{ env.PLUGINS_BRANCH }}
-          path: plugins
-      - name: ls
-        run: ls -lah
       - name: Install build tools
         run: |
           apt update
           apt install -y git golang file
+      - name: Clone plugins
+        run: |
+          git clone --branch ${{ env.PLUGINS_BRANCH }} --depth 1 https://github.com/containernetworking/plugins.git plugins
+      - name: ls
+        run: ls -lah
       #- name: Apply patches
       #  working-directory: plugins
       #  run: git apply ../*.patch
