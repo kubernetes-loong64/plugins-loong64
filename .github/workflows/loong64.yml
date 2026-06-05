@@ -49,7 +49,7 @@ jobs:
       - name: Install build tools
         run: |
           apt update
-          apt install -y git golang file
+          apt install -y git golang file rpm
       - name: Clone plugins
         run: |
           git clone --branch ${{ env.PLUGINS_BRANCH }} --depth 1 https://github.com/containernetworking/plugins.git plugins
@@ -79,3 +79,51 @@ jobs:
           name: plugins-loong64-binaries
           path: |
             plugins/bin/*
+
+      - name: Build kubernetes-cni RPM
+        run: |
+          RPM_VERSION=$(echo "${{ env.PLUGINS_BRANCH }}" | sed 's/^v//')
+          RELEASE=${{ github.run_number }}
+
+          echo "Building kubernetes-cni RPM version ${RPM_VERSION}-${RELEASE}"
+
+          RPMBUILD_DIR=~/rpmbuild
+          mkdir -p ${RPMBUILD_DIR}/{SOURCES,SPECS,RPMS,SRPMS,BUILD,BUILDROOT}
+
+          # Prepare contents for the source tarball (%setup -q -c creates dir and extracts into it)
+          PKG_DIR=kubernetes-cni-${RPM_VERSION}
+          mkdir -p ${PKG_DIR}/loong64
+          cp plugins/bin/* ${PKG_DIR}/loong64/
+          cp templates/latest/kubernetes-cni/LICENSE ${PKG_DIR}/
+          cp templates/latest/kubernetes-cni/README.md ${PKG_DIR}/
+
+          tar czf ${RPMBUILD_DIR}/SOURCES/kubernetes-cni_${RPM_VERSION}.orig.tar.gz ${PKG_DIR}
+
+          # Generate spec from template, substituting version/release and forcing loong64 arch
+          sed -e "s/{{ .RPMVersion }}/${RPM_VERSION}/g" \
+              -e "s/{{ .Revision }}/${RELEASE}/g" \
+              -e 's/KUBE_ARCH="\$(uname -m)"/KUBE_ARCH="loong64"/' \
+              templates/latest/kubernetes-cni/kubernetes-cni.spec \
+              > ${RPMBUILD_DIR}/SPECS/kubernetes-cni.spec
+
+          # Build RPM for loongarch64 target
+          rpmbuild -bb ${RPMBUILD_DIR}/SPECS/kubernetes-cni.spec \
+            --define "_topdir ${RPMBUILD_DIR}" \
+            --target loongarch64-linux
+
+          RPM_FILE=$(find ${RPMBUILD_DIR}/RPMS -type f -name '*.rpm' | head -1)
+          echo "RPM_FILE=${RPM_FILE}"
+          sha256sum ${RPM_FILE}
+          echo "=== RPM package info ==="
+          rpm -qpi ${RPM_FILE}
+          echo "=== RPM package contents ==="
+          mkdir -p ${RPMBUILD_DIR}/rpm-extract
+          cd ${RPMBUILD_DIR}/rpm-extract
+          rpm2cpio ${RPM_FILE} | cpio -idmv
+          cd -
+      - name: Upload kubernetes-cni RPM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kubernetes-cni-loong64-rpm
+          path: |
+            ~/rpmbuild/RPMS/**/*.rpm
