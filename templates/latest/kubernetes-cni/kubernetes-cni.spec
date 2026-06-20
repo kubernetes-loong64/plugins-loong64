@@ -2,8 +2,10 @@
 %undefine _missing_build_ids_terminate_build
 
 Name: kubernetes-cni
-Version: {{ .RPMVersion }}
-Release: {{ .Revision }}
+#Version: {{ .RPMVersion }}
+#Release: {{ .Revision }}
+Version: %{version}
+Release: %{release}
 Summary: Binaries required to provision kubernetes container networking
 
 %if "%{_vendor}" == "debbuild"
@@ -13,20 +15,21 @@ Group: net
 Packager: Kubernetes Authors <dev@kubernetes.io>
 License: Apache-2.0
 URL: https://kubernetes.io
-Source0: %{name}_%{version}.orig.tar.gz
+# Source0: %{name}_%{version}.orig.tar.gz
 
 %description
 %{summary}.
 
-%prep
-%setup -q -c
+# %prep
+# %setup -q -c
 
 %build
 # Nothing to build
 
 %install
 # Detect host arch
-KUBE_ARCH="$(uname -m)"
+# KUBE_ARCH="$(uname -m)"
+KUBE_ARCH="%{kube_arch}"
 
 # Install files
 mkdir -p %{buildroot}/opt/cni/bin
@@ -45,7 +48,7 @@ touch %{buildroot}%{_sysconfdir}/cni/net.d/.kubernetes-cni-keep
 %if "%{_vendor}" == "debbuild"
 %{_sysconfdir}/cni/net.d/.kubernetes-cni-keep
 %endif
-%license LICENSE
-%doc README.md
+# %license LICENSE
+# %doc README.md
 
 %changelog

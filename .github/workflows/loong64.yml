@@ -88,27 +88,20 @@ jobs:
           echo "Building kubernetes-cni RPM version ${RPM_VERSION}-${RELEASE}"
 
           RPMBUILD_DIR=~/rpmbuild
-          mkdir -p ${RPMBUILD_DIR}/{SOURCES,SPECS,RPMS,SRPMS,BUILD,BUILDROOT}
+          mkdir -p ${RPMBUILD_DIR}/{SPECS,RPMS,SRPMS,BUILD,BUILDROOT}
 
-          # Prepare contents for the source tarball (%setup -q -c creates dir and extracts into it)
-          PKG_DIR=kubernetes-cni-${RPM_VERSION}
-          mkdir -p ${PKG_DIR}/loong64
-          cp plugins/bin/* ${PKG_DIR}/loong64/
-          cp templates/latest/kubernetes-cni/LICENSE ${PKG_DIR}/
-          cp templates/latest/kubernetes-cni/README.md ${PKG_DIR}/
+          # Copy binaries to BUILD directory for %install to find
+          mkdir -p ${RPMBUILD_DIR}/BUILD/loong64
+          cp plugins/bin/* ${RPMBUILD_DIR}/BUILD/loong64/
 
-          tar czf ${RPMBUILD_DIR}/SOURCES/kubernetes-cni_${RPM_VERSION}.orig.tar.gz ${PKG_DIR}
-
-          # Generate spec from template, substituting version/release and forcing loong64 arch
-          sed -e "s/{{ .RPMVersion }}/${RPM_VERSION}/g" \
-              -e "s/{{ .Revision }}/${RELEASE}/g" \
-              -e 's/KUBE_ARCH="\$(uname -m)"/KUBE_ARCH="loong64"/' \
-              templates/latest/kubernetes-cni/kubernetes-cni.spec \
-              > ${RPMBUILD_DIR}/SPECS/kubernetes-cni.spec
+          cp templates/latest/kubernetes-cni/kubernetes-cni.spec ${RPMBUILD_DIR}/SPECS/
 
           # Build RPM for loongarch64 target
-          rpmbuild -bb ${RPMBUILD_DIR}/SPECS/kubernetes-cni.spec \
+          rpmbuild -ba ${RPMBUILD_DIR}/SPECS/kubernetes-cni.spec \
             --define "_topdir ${RPMBUILD_DIR}" \
+            --define "version ${RPM_VERSION}" \
+            --define "release ${RELEASE}" \
+            --define "kube_arch loong64" \
             --target loongarch64-linux
 
           RPM_FILE=$(find ${RPMBUILD_DIR}/RPMS -type f -name '*.rpm' | head -1)
