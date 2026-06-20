@@ -1,20 +1,23 @@
 %global debug_package %{nil}
 %undefine _missing_build_ids_terminate_build
+%undefine __strip
 
 Name: kubernetes-cni
 #Version: {{ .RPMVersion }}
 #Release: {{ .Revision }}
-Version: %{version}
-Release: %{release}
+Version: %{?version}%{!?version:1}
+Release: %{?release}%{!?release:1}%{?dist}
 Summary: Binaries required to provision kubernetes container networking
 
 %if "%{_vendor}" == "debbuild"
 Group: net
 %endif
 
-Packager: Kubernetes Authors <dev@kubernetes.io>
+#Packager: Kubernetes Authors <dev@kubernetes.io>
+Packager: 徐晓伟 <xuxiaowei@xuxiaowei.com.cn>
 License: Apache-2.0
-URL: https://kubernetes.io
+URL: https://github.com/kubernetes-loong64/plugins-loong64
+BugURL: https://github.com/kubernetes-loong64/plugins-loong64/issues
 # Source0: %{name}_%{version}.orig.tar.gz
 
 %description
