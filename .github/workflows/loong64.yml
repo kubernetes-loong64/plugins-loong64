@@ -127,7 +127,6 @@ jobs:
       - name: Print plugins version
         run: |
           plugins/bin/bandwidth -v
-          plugins/bin/bandwidth -v
           plugins/bin/bridge -v
           plugins/bin/dhcp -v
           plugins/bin/dummy -v
