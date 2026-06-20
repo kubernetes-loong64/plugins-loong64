@@ -371,7 +371,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build, rpm-anolis, deb-debian]
+    needs: [ build, rpm-anolis, deb-debian ]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -470,8 +470,11 @@ jobs:
 
   trigger-gitlab:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build, rpm-anolis, deb-debian, release]
+    needs: [ build, rpm-anolis, deb-debian, release ]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        KUBERNETES_VERSION: [ v1.36 ]
     permissions:
       contents: read
     env:
@@ -494,6 +497,7 @@ jobs:
           --fail \
           -F token=${{ secrets.GITLAB_TRIGGER_TOKEN }} \
           -F ref=${{ env.GITLAB_REF }} \
+          -F "variables[KUBERNETES_VERSION]=${{ matrix.KUBERNETES_VERSION }}" \
           -F "variables[ANOLIS_VERSION]=${{ env.ANOLIS_VERSION }}" \
           -F "variables[DEBIAN_VERSION_CODENAME]=${{ env.DEBIAN_VERSION_CODENAME }}" \
           -F "variables[IS_STABLE]=${{ env.IS_STABLE }}" \
