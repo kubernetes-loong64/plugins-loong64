@@ -18,7 +18,7 @@ Packager: 徐晓伟 <xuxiaowei@xuxiaowei.com.cn>
 License: Apache-2.0
 URL: https://github.com/kubernetes-loong64/plugins-loong64
 BugURL: https://github.com/kubernetes-loong64/plugins-loong64/issues
-# Source0: %{name}_%{version}.orig.tar.gz
+# Source0: name_version.orig.tar.gz
 
 %description
 %{summary}.
