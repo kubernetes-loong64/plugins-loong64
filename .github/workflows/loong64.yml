@@ -124,7 +124,7 @@ jobs:
       - name: Install QEMU binfmt for loong64
         run: |
           docker run --privileged --rm ghcr.io/loong64/binfmt --install all
-      - name: Print docker version
+      - name: Print plugins version
         run: |
           plugins/bin/bandwidth -v
           plugins/bin/bandwidth -v
