@@ -1,6 +1,6 @@
 %global debug_package %{nil}
 %undefine _missing_build_ids_terminate_build
-%undefine __strip
+%global __strip /bin/true
 
 Name: kubernetes-cni
 #Version: {{ .RPMVersion }}
