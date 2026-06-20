@@ -13,6 +13,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container: debian:13
+    outputs:
+      RAW_VERSION: ${{ steps.extract.outputs.RAW_VERSION }}
+      PLUGINS_BRANCH: ${{ steps.extract.outputs.PLUGINS_BRANCH }}
+      RELEASE: ${{ steps.extract.outputs.RELEASE }}
+      IS_STABLE: ${{ steps.extract.outputs.IS_STABLE }}
+      VERSION: ${{ steps.extract.outputs.VERSION }}
     permissions:
       contents: read
     steps:
@@ -36,9 +42,21 @@ jobs:
           echo "REF=$REF"
           RAW_VERSION=$(echo $REF | awk -F'loong64-' '{print $2}')
           echo "RAW_VERSION=$RAW_VERSION"
+          echo "RAW_VERSION=$RAW_VERSION" >> ${GITHUB_ENV}
+          echo "RAW_VERSION=$RAW_VERSION" >> ${GITHUB_OUTPUT}
           PLUGINS_BRANCH=$(echo $RAW_VERSION | awk -F'+' '{print $1}')
           echo "PLUGINS_BRANCH=$PLUGINS_BRANCH"
           echo "PLUGINS_BRANCH=$PLUGINS_BRANCH" >> ${GITHUB_ENV}
+          echo "PLUGINS_BRANCH=$PLUGINS_BRANCH" >> ${GITHUB_OUTPUT}
+          VERSION=$(echo $PLUGINS_BRANCH | awk -F'v' '{print $2}')
+          echo "VERSION=$VERSION"
+          echo "VERSION=$VERSION" >> ${GITHUB_ENV}
+          echo "VERSION=$VERSION" >> ${GITHUB_OUTPUT}
+          RELEASE=$(echo $RAW_VERSION | awk -F'+' '{print $2}')
+          RELEASE=${RELEASE:-alpha.${{ github.run_number }}}
+          echo "RELEASE=$RELEASE"
+          echo "RELEASE=$RELEASE" >> ${GITHUB_ENV}
+          echo "RELEASE=$RELEASE" >> ${GITHUB_OUTPUT}
           if echo "$RAW_VERSION" | grep -qE '[+].*(alpha|beta|rc)'; then
             IS_STABLE=false
           else
@@ -80,43 +98,300 @@ jobs:
           path: |
             plugins/bin/*
 
-      - name: Build kubernetes-cni RPM
+  rpm-anolis:
+    needs: build
+    runs-on: ubuntu-latest
+    container: openanolis/anolisos:23
+    outputs:
+      ANOLIS_RPM_NAME: ${{ steps.rpm-file.outputs.ANOLIS_RPM_NAME }}
+      ANOLIS_VERSION: ${{ steps.extract-version.outputs.ANOLIS_VERSION }}
+    permissions:
+      contents: read
+    env:
+      RAW_VERSION: ${{ needs.build.outputs.RAW_VERSION }}
+      PLUGINS_BRANCH: ${{ needs.build.outputs.PLUGINS_BRANCH }}
+      RELEASE: ${{ needs.build.outputs.RELEASE }}
+      ARCH: loongarch64
+      VERSION: ${{ needs.build.outputs.VERSION }}
+    steps:
+      - name: Install gzip
+        run: yum install -y gzip
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Extract version
+        id: extract-version
         run: |
-          RPM_VERSION=$(echo "${{ env.PLUGINS_BRANCH }}" | sed 's/^v//')
-          RELEASE=${{ github.run_number }}
-
-          echo "Building kubernetes-cni RPM version ${RPM_VERSION}-${RELEASE}"
-
-          RPMBUILD_DIR=~/rpmbuild
-          mkdir -p ${RPMBUILD_DIR}/{SPECS,RPMS,SRPMS,BUILD,BUILDROOT}
-
-          # Copy binaries to BUILD directory for %install to find
-          mkdir -p ${RPMBUILD_DIR}/BUILD/loong64
-          cp plugins/bin/* ${RPMBUILD_DIR}/BUILD/loong64/
-
-          cp templates/latest/kubernetes-cni/kubernetes-cni.spec ${RPMBUILD_DIR}/SPECS/
-
-          # Build RPM for loongarch64 target
-          rpmbuild -ba ${RPMBUILD_DIR}/SPECS/kubernetes-cni.spec \
-            --define "_topdir ${RPMBUILD_DIR}" \
-            --define "version ${RPM_VERSION}" \
-            --define "release ${RELEASE}" \
-            --define "kube_arch loong64" \
-            --target loongarch64-linux
-
-          RPM_FILE=$(find ${RPMBUILD_DIR}/RPMS -type f -name '*.rpm' | head -1)
-          echo "RPM_FILE=${RPM_FILE}"
-          sha256sum ${RPM_FILE}
-          echo "=== RPM package info ==="
-          rpm -qpi ${RPM_FILE}
-          echo "=== RPM package contents ==="
-          mkdir -p ${RPMBUILD_DIR}/rpm-extract
-          cd ${RPMBUILD_DIR}/rpm-extract
-          rpm2cpio ${RPM_FILE} | cpio -idmv
-          cd -
-      - name: Upload kubernetes-cni RPM
+          DIST=$(rpm --eval '%{dist}')
+          echo "DIST=$DIST"
+          echo "DIST=$DIST" >> ${GITHUB_ENV}
+          ANOLIS_VERSION=$(cat /etc/anolis-release | awk '{print $4}' | cut -d'.' -f1)
+          echo "ANOLIS_VERSION=$ANOLIS_VERSION"
+          echo "ANOLIS_VERSION=$ANOLIS_VERSION" >> ${GITHUB_OUTPUT}
+          echo "ANOLIS_VERSION=$ANOLIS_VERSION" >> ${GITHUB_ENV}
+      - name: Install build tools
+        run: yum install -y rpm-build rpmdevtools
+      - name: Download binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: plugins-loong64-binaries
+          path: artifacts
+      - name: Build RPM
+        run: |
+          rm -rf ~/rpmbuild
+          rpmdev-setuptree
+          mkdir -p ~/rpmbuild/BUILD/loong64
+          cp artifacts/* ~/rpmbuild/BUILD/loong64/
+          cp templates/latest/kubernetes-cni/kubernetes-cni.spec ~/rpmbuild/SPECS/
+          rpmbuild -ba --target ${{ env.ARCH }} ~/rpmbuild/SPECS/kubernetes-cni.spec \
+            --define "version ${{ env.VERSION }}" \
+            --define "release ${{ env.RELEASE }}" \
+            --define "kube_arch loong64"
+          mkdir -p rpms
+          find ~/rpmbuild/RPMS -name '*.rpm' -exec cp -t rpms {} +
+          find ~/rpmbuild/SRPMS -name '*.src.rpm' -exec cp -t rpms {} +
+      - name: List RPM files
+        id: rpm-file
+        run: |
+          ANOLIS_RPM_NAME=kubernetes-cni-${{ env.VERSION }}-${{ env.RELEASE }}${{ env.DIST }}.${{ env.ARCH }}.rpm
+          echo "ANOLIS_RPM_NAME=$ANOLIS_RPM_NAME"
+          echo "ANOLIS_RPM_NAME=$ANOLIS_RPM_NAME" >> $GITHUB_OUTPUT
+          echo "ANOLIS_RPM_NAME=$ANOLIS_RPM_NAME" >> $GITHUB_ENV
+          echo "=== RPM file name: $ANOLIS_RPM_NAME ==="
+          sha256sum rpms/$ANOLIS_RPM_NAME
+          echo "=== RPM info ==="
+          rpm -qpi rpms/$ANOLIS_RPM_NAME
+          echo "=== RPM contents ==="
+          rpm2cpio rpms/$ANOLIS_RPM_NAME | cpio -it
+      - name: Upload RPM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: kubernetes-cni-loong64-rpm
           path: |
-            ~/rpmbuild/RPMS/**/*.rpm
+            rpms/${{ env.ANOLIS_RPM_NAME }}
+      - name: Export system version
+        run: |
+          cat /etc/os-release > /tmp/rpm-anolis-os-release.txt
+          cat /tmp/rpm-anolis-os-release.txt
+      - name: Export installed packages
+        run: |
+          rpm -qa --queryformat '%{NAME}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\n' | column -t -s $'\t' | sort -f > /tmp/rpm-anolis-installed-packages-rpm.txt
+          cat /tmp/rpm-anolis-installed-packages-rpm.txt
+      - name: Upload system info
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kubernetes-cni-loong64-rpm-system-info
+          path: |
+            /tmp/rpm-anolis-installed-packages-rpm.txt
+            /tmp/rpm-anolis-os-release.txt
+
+  deb-debian:
+    needs: build
+    runs-on: ubuntu-latest
+    container: debian:13
+    outputs:
+      DEBIAN_DEB_NAME: ${{ steps.deb-file.outputs.DEBIAN_DEB_NAME }}
+      DEBIAN_VERSION_CODENAME: ${{ steps.extract-version.outputs.DEBIAN_VERSION_CODENAME }}
+    permissions:
+      contents: read
+    env:
+      RAW_VERSION: ${{ needs.build.outputs.RAW_VERSION }}
+      PLUGINS_BRANCH: ${{ needs.build.outputs.PLUGINS_BRANCH }}
+      RELEASE: ${{ needs.build.outputs.RELEASE }}
+      ARCH: loong64
+      VERSION: ${{ needs.build.outputs.VERSION }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install build tools
+        run: |
+          apt update
+          apt install -y file
+      - name: Extract version
+        id: extract-version
+        run: |
+          ID_VERSION_ID=$(sh -c '. /etc/os-release && echo "${ID}.${VERSION_ID}"')
+          echo "ID_VERSION_ID=$ID_VERSION_ID"
+          echo "ID_VERSION_ID=$ID_VERSION_ID" >> ${GITHUB_ENV}
+          DEBIAN_VERSION_CODENAME=$(sh -c '. /etc/os-release && echo "${VERSION_CODENAME}"')
+          echo "DEBIAN_VERSION_CODENAME=$DEBIAN_VERSION_CODENAME"
+          echo "DEBIAN_VERSION_CODENAME=$DEBIAN_VERSION_CODENAME" >> ${GITHUB_OUTPUT}
+          echo "DEBIAN_VERSION_CODENAME=$DEBIAN_VERSION_CODENAME" >> ${GITHUB_ENV}
+      - name: Download binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: plugins-loong64-binaries
+          path: artifacts
+      - name: Build DEB
+        run: |
+          PKG_ROOT=$(mktemp -d)
+          mkdir -p $PKG_ROOT/opt/cni/bin
+          mkdir -p $PKG_ROOT/etc/cni/net.d
+          mkdir -p $PKG_ROOT/DEBIAN
+
+          install -m 755 artifacts/* $PKG_ROOT/opt/cni/bin/
+          touch $PKG_ROOT/etc/cni/net.d/.kubernetes-cni-keep
+
+          cat > $PKG_ROOT/DEBIAN/control << EOF
+          Package: kubernetes-cni
+          Version: ${{ env.VERSION }}-${{ env.RELEASE }}~${{ env.ID_VERSION_ID }}~${{ env.DEBIAN_VERSION_CODENAME }}
+          Architecture: ${{ env.ARCH }}
+          Maintainer: 徐晓伟 <xuxiaowei@xuxiaowei.com.cn>
+          Description: Binaries required to provision kubernetes container networking
+           Kubernetes CNI plugins for the loong64 (LoongArch) architecture.
+          Homepage: https://github.com/containernetworking/plugins
+          Section: net
+          Priority: optional
+          EOF
+
+          mkdir -p debs
+          dpkg-deb --build $PKG_ROOT debs/
+
+          find debs -name '*.deb'
+          # Rename: replace ~ with . in filename (GitHub releases / URLs don't like ~)
+          for f in debs/*.deb; do
+            new_name=$(echo "$f" | tr '~' '.')
+            if [ "$f" != "$new_name" ]; then
+              mv "$f" "$new_name"
+              echo "Renamed: $f -> $new_name"
+            fi
+          done
+      - name: List DEB files
+        id: deb-file
+        run: |
+          DEBIAN_DEB_NAME=kubernetes-cni_${{ env.VERSION }}-${{ env.RELEASE }}.${{ env.ID_VERSION_ID }}.${{ env.DEBIAN_VERSION_CODENAME }}_${{ env.ARCH }}.deb
+          echo "DEBIAN_DEB_NAME=$DEBIAN_DEB_NAME"
+          echo "DEBIAN_DEB_NAME=$DEBIAN_DEB_NAME" >> $GITHUB_OUTPUT
+          echo "DEBIAN_DEB_NAME=$DEBIAN_DEB_NAME" >> $GITHUB_ENV
+          echo "=== DEB file name: $DEBIAN_DEB_NAME ==="
+          sha256sum debs/$DEBIAN_DEB_NAME
+          echo "=== DEB info ==="
+          dpkg --info debs/$DEBIAN_DEB_NAME
+          echo "=== DEB contents ==="
+          dpkg --contents debs/$DEBIAN_DEB_NAME
+      - name: Upload DEB
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kubernetes-cni-loong64-deb
+          path: |
+            debs/${{ env.DEBIAN_DEB_NAME }}
+      - name: Export system version
+        run: |
+          cat /etc/os-release > /tmp/deb-debian-os-release.txt
+          cat /tmp/deb-debian-os-release.txt
+      - name: Export installed packages
+        run: |
+          dpkg -l > /tmp/deb-debian-installed-packages-packages.txt
+          cat /tmp/deb-debian-installed-packages-packages.txt
+      - name: Upload system info
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kubernetes-cni-loong64-deb-system-info
+          path: |
+            /tmp/deb-debian-installed-packages-packages.txt
+            /tmp/deb-debian-os-release.txt
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, rpm-anolis, deb-debian]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      BASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}
+      ANOLIS_RPM_NAME: ${{ needs.rpm-anolis.outputs.ANOLIS_RPM_NAME }}
+      DEBIAN_DEB_NAME: ${{ needs.deb-debian.outputs.DEBIAN_DEB_NAME }}
+      IS_STABLE: ${{ needs.build.outputs.IS_STABLE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Download binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: plugins-loong64-binaries
+          path: loong64-artifacts
+      - name: Download RPM system info
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: kubernetes-cni-loong64-rpm-system-info
+          path: loong64-artifacts
+      - name: Download DEB system info
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: kubernetes-cni-loong64-deb-system-info
+          path: loong64-artifacts
+      - name: Download RPM
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: kubernetes-cni-loong64-rpm
+          path: loong64-artifacts
+      - name: Download DEB
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: kubernetes-cni-loong64-deb
+          path: loong64-artifacts
+      - name: List release artifacts
+        run: |
+          find loong64-artifacts -type f
+      - name: Generate release body
+        run: |
+          cat > release-body.md <<'BODYEOF'
+          ## Artifacts
+
+          | File                         | Download                                                                         |
+          |------------------------------|----------------------------------------------------------------------------------|
+          | CNI plugins (binaries)       | [plugins-loong64-binaries.zip](${{ env.BASE_URL }}/plugins-loong64-binaries.zip) |
+          | `${{ env.ANOLIS_RPM_NAME }}` | [${{ env.ANOLIS_RPM_NAME }}](${{ env.BASE_URL }}/${{ env.ANOLIS_RPM_NAME }})     |
+          | `${{ env.DEBIAN_DEB_NAME }}` | [${{ env.DEBIAN_DEB_NAME }}](${{ env.BASE_URL }}/${{ env.DEBIAN_DEB_NAME }})     |
+
+          ```shell
+          # RPM (Anolis)
+          curl -LO ${{ env.BASE_URL }}/${{ env.ANOLIS_RPM_NAME }}
+          curl -LO ${{ env.BASE_URL }}/${{ env.ANOLIS_RPM_NAME }}.asc
+
+          # DEB (Debian)
+          curl -LO ${{ env.BASE_URL }}/${{ env.DEBIAN_DEB_NAME }}
+          curl -LO ${{ env.BASE_URL }}/${{ env.DEBIAN_DEB_NAME }}.asc
+          ```
+          BODYEOF
+      - name: Create Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release-body.md
+          prerelease: ${{ env.IS_STABLE == 'false' }}
+          make_latest: ${{ env.IS_STABLE == 'true' && 'legacy' || 'false' }}
+          files: |
+            loong64-artifacts/**
+
+  trigger-gitlab:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, rpm-anolis, deb-debian, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      IS_STABLE: ${{ needs.build.outputs.IS_STABLE }}
+      BASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}
+      ANOLIS_RPM_NAME: ${{ needs.rpm-anolis.outputs.ANOLIS_RPM_NAME }}
+      ANOLIS_VERSION: ${{ needs.rpm-anolis.outputs.ANOLIS_VERSION }}
+      DEBIAN_DEB_NAME: ${{ needs.deb-debian.outputs.DEBIAN_DEB_NAME }}
+      DEBIAN_VERSION_CODENAME: ${{ needs.deb-debian.outputs.DEBIAN_VERSION_CODENAME }}
+      GITLAB_API_URL: ${{ vars.GITLAB_API_URL || 'https://gitlab.xuxiaowei.com.cn' }}
+      GITLAB_PROJECT_ID: ${{ vars.GITLAB_PROJECT_ID || '590' }}
+      GITLAB_REF: ${{ vars.GITLAB_REF || 'sync' }}
+    steps:
+      - name: Trigger GitLab CI
+        env:
+          ANOLIS_RPM_URL: ${{ env.BASE_URL }}/${{ env.ANOLIS_RPM_NAME }}
+          DEBIAN_DEB_URL: ${{ env.BASE_URL }}/${{ env.DEBIAN_DEB_NAME }}
+        run: |
+          curl -X POST \
+          --fail \
+          -F token=${{ secrets.GITLAB_TRIGGER_TOKEN }} \
+          -F ref=${{ env.GITLAB_REF }} \
+          -F "variables[ANOLIS_VERSION]=${{ env.ANOLIS_VERSION }}" \
+          -F "variables[DEBIAN_VERSION_CODENAME]=${{ env.DEBIAN_VERSION_CODENAME }}" \
+          -F "variables[IS_STABLE]=${{ env.IS_STABLE }}" \
+          -F "variables[ANOLIS_RPM_URL]=${{ env.ANOLIS_RPM_URL }}" \
+          -F "variables[DEBIAN_DEB_URL]=${{ env.DEBIAN_DEB_URL }}" \
+          ${{ env.GITLAB_API_URL }}/api/v4/projects/${{ env.GITLAB_PROJECT_ID }}/trigger/pipeline
