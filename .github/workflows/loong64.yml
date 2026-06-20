@@ -73,6 +73,30 @@ jobs:
           git clone --branch ${{ env.PLUGINS_BRANCH }} --depth 1 https://github.com/containernetworking/plugins.git plugins
       - name: ls
         run: ls -lah
+      - name: Install Docker CLI
+        run: |
+          apt remove $(dpkg --get-selections docker.io docker-compose docker-doc podman-docker containerd runc | cut -f1)
+          apt update
+          apt install -y ca-certificates curl
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          # Add the repository to Apt sources:
+          tee /etc/apt/sources.list.d/docker.sources <<EOF
+          Types: deb
+          URIs: https://download.docker.com/linux/debian
+          Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+          Components: stable
+          Architectures: $(dpkg --print-architecture)
+          Signed-By: /etc/apt/keyrings/docker.asc
+          EOF
+          apt update
+          apt install -y docker-ce-cli
+      - name: Verify Docker installation
+        run: |
+          ls -la /run/docker.sock 2>/dev/null || echo "/run/docker.sock not found"
+          echo "DOCKER_HOST=$DOCKER_HOST"
+          docker info
       #- name: Apply patches
       #  working-directory: plugins
       #  run: git apply ../*.patch
@@ -97,6 +121,30 @@ jobs:
           name: plugins-loong64-binaries
           path: |
             plugins/bin/*
+      - name: Install QEMU binfmt for loong64
+        run: |
+          docker run --privileged --rm ghcr.io/loong64/binfmt --install all
+      - name: Print docker version
+        run: |
+          plugins/bin/bandwidth -v
+          plugins/bin/bandwidth -v
+          plugins/bin/bridge -v
+          plugins/bin/dhcp -v
+          plugins/bin/dummy -v
+          plugins/bin/firewall -v
+          plugins/bin/host-device -v
+          plugins/bin/host-local -v
+          plugins/bin/ipvlan -v
+          plugins/bin/loopback -v
+          plugins/bin/macvlan -v
+          plugins/bin/portmap -v
+          plugins/bin/ptp -v
+          plugins/bin/sbr -v
+          plugins/bin/static -v
+          plugins/bin/tap -v
+          plugins/bin/tuning -v
+          plugins/bin/vlan -v
+          plugins/bin/vrf -v
 
   rpm-anolis:
     needs: build
